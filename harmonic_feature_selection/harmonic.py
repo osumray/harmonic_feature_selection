@@ -8,8 +8,8 @@ from ordered_set import OrderedSet
 import topology
 
 
-#logging.basicConfig(level=logging.DEBUG)
-logging.basicConfig(filename='out.log', encoding='utf-8', level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG)
+#logging.basicConfig(filename='out.log', encoding='utf-8', level=logging.DEBUG)
 
 def sparsity_message(sm):
     logging.debug('Sparsity %.1f%%', 100 * (1 - sm.nnz / (sm.shape[0] * sm.shape[1])))
@@ -130,20 +130,20 @@ class DualFeatureSelectionProblem(FeatureSelectionProblem):
         diagonal_block = 2 * in_degree * self._self_kernel_matrices[simplex]
         for other_simplex in self.all_simplices:
             if other_simplex in self.to_simplices_dict[simplex]:
-                logging.debug('%s:Removing there and back for %s', simplex, other_simplex)
+                logging.debug('%s:%s:Removing there and back', simplex, other_simplex)
                 diagonal_block -= self._there_and_back_matrices[simplex][other_simplex]
             elif simplex in self.to_simplices_dict[other_simplex]:
-                logging.debug('%s: Adding there and back for %s', simplex, other_simplex)
+                logging.debug('%s:%s:Adding there and back', simplex, other_simplex)
                 diagonal_block += self._there_and_back_matrices[simplex][other_simplex]
             else:
-                logging.debug('%s: No contribution for %s', simplex, other_simplex)
+                logging.debug('%s:%s:No contribution', simplex, other_simplex)
         return diagonal_block
 
-    def _check_matrix_shape(self, nrows, ncols, m):
+    def _check_matrix_shape(self, simplex1, simplex2, nrows, ncols, m):
         if m.shape == (nrows, ncols):
-            logging.debug('Shape OK:%s', m.shape)
+            logging.debug('%s:%s:Shape OK:%s', simplex1, simplex2, m.shape)
         else:
-            logging.error('Matrix is wrong shape: Should be %s: Is actually %s', (nrows, ncols), m.shape)
+            logging.error('%s:%s:Matrix is wrong shape: Should be %s: Is actually %s', simplex1, simplex2, (nrows, ncols), m.shape)
 
     def laplacian(self):
         logging.info('Computing Laplacian matrix')
@@ -157,21 +157,18 @@ class DualFeatureSelectionProblem(FeatureSelectionProblem):
                 dim_col = self.simplex_stalk_dimension(col_simplex)
                 logging.debug('%s:%s:Dim row %i:Dim col %i', row_simplex, col_simplex, dim_row, dim_col)
                 if row_index == col_index:
-                    logging.debug('Add diagonal block matrix shape')
+                    logging.debug('%s:%s:Add diagonal block matrix shape', row_simplex, col_simplex)
                     matrix = self._compute_diagonal_block(row_simplex)
-                    self._check_matrix_shape(dim_row, dim_col, matrix)                    
                 elif col_simplex in self.to_simplices_dict[row_simplex]:
-                    logging.debug('Add kernel matrix')
+                    logging.debug('%s:%s:Add kernel matrix', row_simplex, col_simplex)
                     matrix = - self._kernel_matrices[row_simplex][col_simplex]
-                    self._check_matrix_shape(dim_row, dim_col, matrix)                    
                 elif row_simplex in self.to_simplices_dict[col_simplex]:
-                    logging.debug('Add kernel matrix adjoint')
+                    logging.debug('%s:%s:Add kernel matrix adjoint', row_simplex, col_simplex)
                     matrix = - self._kernel_matrices[row_simplex][col_simplex]
-                    self._check_matrix_shape(dim_row, dim_col, matrix)
                 else:
-                    logging.debug('Add zero matrix')
+                    logging.debug('%s:%s:Add zero matrix', row_simplex, col_simplex)
                     matrix = sparse.csc_matrix((dim_row, dim_col))
-                    self._check_matrix_shape(dim_row, dim_col, matrix)
+                self._check_matrix_shape(row_simplex, col_simplex, dim_row, dim_col, matrix)
                 row.append(matrix)
             laplacian_rows.append(row)
         laplacian = sparse.bmat(laplacian_rows)
