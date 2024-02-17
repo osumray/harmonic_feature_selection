@@ -8,7 +8,7 @@ from ordered_set import OrderedSet
 import topology
 
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 #logging.basicConfig(filename='out.log', encoding='utf-8', level=logging.DEBUG)
 
 def sparsity_message(sm):
@@ -39,6 +39,7 @@ class FeatureSelectionProblem:
         for simplex in self.all_simplices:
             logging.debug('Kernel matrix for %s', simplex)
             self._self_kernel_matrices[simplex] = spy(sparsity_message, self._compute_kernel(simplex, simplex))
+        logging.info('Done precomputing self kernel matrices')
 
     def _compute_cholesky_factor(self, simplex):
         try: 
@@ -99,7 +100,11 @@ class FeatureSelectionProblem:
 
     def simplex_stalk_dimension(self, simplex):
         return len(self.simplex_points[simplex])
-
+    
+    def laplacian(self):
+        laplacian_matrix = self._compute_laplacian()
+        inner_product = self._compute_inner_product()
+        return LaplacianGeneralisedEigenvectorProblem(laplacian_matrix, inner_product)
 
 class OriginalFeatureSelectionProblem(FeatureSelectionProblem):
     def __init__(self, simplicial_complex, simplex_points, kernel, at_simplex):
@@ -110,13 +115,18 @@ class OriginalFeatureSelectionProblem(FeatureSelectionProblem):
         logging.debug(to_simplices)
         super().__init__(simplicial_complex, simplex_points, kernel, from_simplices, to_simplices, do_both_there_and_back=False)
 
-    def laplacian(self):
+    def _compute_laplacian(self):
+        logging.info('Computing Laplacian matrix')
         degree = len(self.all_other_simplices)
         laplacian_matrix = degree * self._self_kernel_matrices[self.at_simplex]
         for to_simplex in self.all_other_simplices:
             laplacian_matrix -= self._there_and_back_matrices[self.at_simplex][to_simplex]
+        logging.info('Finished Laplacian matrix')
         return laplacian_matrix
 
+    def _compute_inner_product(self):
+        return self._self_kernel_matrices[self.at_simplex]
+    
 class DualFeatureSelectionProblem(FeatureSelectionProblem):
     def __init__(self, simplicial_complex, simplex_points, kernel):
         from_simplices = set(simplicial_complex.simplices())
@@ -124,7 +134,7 @@ class DualFeatureSelectionProblem(FeatureSelectionProblem):
         super().__init__(simplicial_complex, simplex_points, kernel, from_simplices, to_simplices_dict, do_both_there_and_back=True)
 
     def _compute_diagonal_block(self, simplex):
-        logging.debug('Computing diagonal block for %s', simplex)
+        logging.debug(':%s:Computing diagonal block', simplex)
         in_degree = len(self.to_simplices_dict[simplex])
         logging.debug('%s:In degree is %i', simplex, in_degree)
         diagonal_block = 2 * in_degree * self._self_kernel_matrices[simplex]
@@ -145,7 +155,7 @@ class DualFeatureSelectionProblem(FeatureSelectionProblem):
         else:
             logging.error('%s:%s:Matrix is wrong shape: Should be %s: Is actually %s', simplex1, simplex2, (nrows, ncols), m.shape)
 
-    def laplacian(self):
+    def _compute_laplacian(self):
         logging.info('Computing Laplacian matrix')
         laplacian_rows = []
         num_rows = len(self.all_simplices)
@@ -171,5 +181,52 @@ class DualFeatureSelectionProblem(FeatureSelectionProblem):
                 self._check_matrix_shape(row_simplex, col_simplex, dim_row, dim_col, matrix)
                 row.append(matrix)
             laplacian_rows.append(row)
-        laplacian = sparse.bmat(laplacian_rows)
+        laplacian = sparse.bmat(laplacian_rows, format='csc')
+        logging.info('Finished Laplacian matrix')
         return laplacian
+    
+    def _compute_inner_product(self):
+        blocks = [self._self_kernel_matrices[s] for s in self.all_simplices]
+        return sparse.block_diag(blocks, format='csc')
+    
+
+class CholeskyShiftInverse(sparse.linalg.LinearOperator):
+    def __init__(self, sym_sp_matrix, shift):
+        self.sym_sp_matrix = sym_sp_matrix
+        self.shift = shift
+        self.chol_factor = sksparse.cholmod.cholesky(self.sym_sp_matrix, beta=shift)
+        super().__init__(sym_sp_matrix.dtype, sym_sp_matrix.shape)
+
+    def _matvec(self, vec):
+        return self.chol_factor.solve_A(vec)
+    
+EigResult = namedtuple('EigResult', 'evals evecs k tol maxiter shift')
+
+class LaplacianGeneralisedEigenvectorProblem:
+    def __init__(self, laplacian_matrix, inner_product):
+        self.laplacian_matrix = laplacian_matrix
+        self.inner_product = inner_product
+
+    def low_spectrum(self, k, tol, maxiter, shift):
+        v0 = np.ones(self.laplacian_matrix.shape[0])
+        logging.info('Computing shift inverse')
+        OPinv = CholeskyShiftInverse(self.laplacian_matrix, shift)
+        try:
+            logging.info('Starting generalised eigenvector problem:k=%i:tol=%f:maxiter=%i:shift=%f', k, tol, maxiter, shift)
+            evals, evecs = sparse.linalg.eigsh(
+                                                self.laplacian_matrix,
+                                                k=k,
+                                                M=self.inner_product,
+                                                sigma=-shift, 
+                                                which='LM', 
+                                                v0=v0, 
+                                                tol=tol, 
+                                                maxiter=maxiter,
+                                                OPinv=OPinv
+            )
+        except sparse.linalg.ArpackNoConvergence as error:
+            logging.error(error)
+            evals = error.eigenvalues
+            evecs = error.eigenvectors    
+        logging.info('Finished generalised eigenvector problem')    
+        return EigResult(evals, evecs, k, tol, maxiter, shift)
