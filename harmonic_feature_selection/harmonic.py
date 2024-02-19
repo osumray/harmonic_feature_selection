@@ -5,7 +5,7 @@ import numpy as np
 from scipy import sparse
 import sksparse
 from ordered_set import OrderedSet
-import topology
+from . import topology
 
 
 logging.basicConfig(level=logging.INFO)
