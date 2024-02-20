@@ -24,6 +24,7 @@ class FeatureSelectionProblem:
         self.simplex_points = simplex_points
         self.kernel = kernel
         self.simplex_pairings = []
+
         self.from_simplices = from_simplices
         self.to_simplices_dict = to_simplices_dict
         self.do_both_there_back = do_both_there_and_back
@@ -191,11 +192,10 @@ class DualFeatureSelectionProblem(FeatureSelectionProblem):
     
 
 class CholeskyShiftInverse(sparse.linalg.LinearOperator):
-    def __init__(self, sym_sp_matrix, shift):
-        self.sym_sp_matrix = sym_sp_matrix
-        self.shift = shift
-        self.chol_factor = sksparse.cholmod.cholesky(self.sym_sp_matrix, beta=shift)
-        super().__init__(sym_sp_matrix.dtype, sym_sp_matrix.shape)
+    def __init__(self, sym_sp_matrix, inner_product, shift):
+        A = sym_sp_matrix + shift * inner_product
+        self.chol_factor = sksparse.cholmod.cholesky(A)
+        super().__init__(A.dtype, A.shape)
 
     def _matvec(self, vec):
         return self.chol_factor.solve_A(vec)
@@ -210,7 +210,7 @@ class LaplacianGeneralisedEigenvectorProblem:
     def low_spectrum(self, k, tol, maxiter, shift):
         v0 = np.ones(self.laplacian_matrix.shape[0])
         logging.info('Computing shift inverse')
-        OPinv = CholeskyShiftInverse(self.laplacian_matrix, shift)
+        OPinv = CholeskyShiftInverse(self.laplacian_matrix, self.inner_product, shift)
         try:
             logging.info('Starting generalised eigenvector problem:k=%i:tol=%f:maxiter=%i:shift=%f', k, tol, maxiter, shift)
             evals, evecs = sparse.linalg.eigsh(
