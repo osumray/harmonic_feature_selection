@@ -5,7 +5,7 @@ setup(
     version='0.1.1',
     description='Code for Harmonic Feature Selection paper',
     author='Otto Sumray',
-    author_email='osumray@gmail.com',
+    author_email='sumray@maths.ox.ac.uk',
     packages=find_packages(),
     install_requires=[
         'ordered_set',
